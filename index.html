@@ -317,6 +317,8 @@ function handleStart(payload)
 			_connection.setLocalDescription(offer);
 		});
 	}, function(error) {
+		// This error is usually related to the camera acquision so fail out.
+		_signaling.close();
 		alert(error);
 	});
 }
@@ -335,6 +337,8 @@ function handleOffer(payload)
 			_connection.setLocalDescription(answer);
 		});
 	}, function(error) {
+		// This error is usually related to the camera acquision so fail out.
+		_signaling.close();
 		alert(error);
 	});
 }
@@ -410,6 +414,31 @@ _signaling.onmessage = function(event)
 		case 'candidate':
 			handleCandidate(object.payload);
 			break;
+	}
+}
+_signaling.onclose = function(event)
+{
+	// This can happen due to an error or due to everything starting up properly so check that.
+	if (!_connectionOpened)
+	{
+		// Something went wrong during startup.
+		_signaling = null;
+		ELT_connecting_header.innerText = "Error - refresh page to try again";
+		ELT_connecting_header = null;
+		
+		// We don't know when we failed so check what else is running.
+		if (null !== _videoTrack)
+		{
+			_videoTrack.stop();
+		}
+		if (null !== _audioTrack)
+		{
+			_audioTrack.stop();
+		}
+		ELT_local_video.srcObject = null;
+		ELT_remote_video.srcObject = null;
+		ELT_toggle_video_button.disabled = true;
+		ELT_toggle_audio_button.disabled = true;
 	}
 }
 </script>

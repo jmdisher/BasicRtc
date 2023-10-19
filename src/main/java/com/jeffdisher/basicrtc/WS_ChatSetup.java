@@ -16,13 +16,19 @@ import com.jeffdisher.breakwater.IWebSocketFactory;
  */
 public class WS_ChatSetup implements IWebSocketFactory, OnePeer.IPeerRegistry
 {
+	private final boolean _isVerbose;
 	private final Map<String, OnePeer> _activePeers = new HashMap<>();
+
+	public WS_ChatSetup(boolean isVerbose)
+	{
+		_isVerbose = isVerbose;
+	}
 
 	@Override
 	public WebSocketListener create(JettyServerUpgradeRequest arg0, Object[] arg1)
 	{
 		String roomName = (String)arg1[1];
-		return new OnePeer(roomName, this);
+		return new OnePeer(_isVerbose, roomName, this);
 	}
 
 	@Override
@@ -33,6 +39,10 @@ public class WS_ChatSetup implements IWebSocketFactory, OnePeer.IPeerRegistry
 		if (peer == registeredPeer)
 		{
 			_activePeers.remove(roomName);
+			if (_isVerbose)
+			{
+				System.out.println("Deregistered room " + roomName);
+			}
 		}
 	}
 
@@ -44,11 +54,19 @@ public class WS_ChatSetup implements IWebSocketFactory, OnePeer.IPeerRegistry
 		if (null != firstPeer)
 		{
 			firstPeer.attachOtherPeer(peer);
+			if (_isVerbose)
+			{
+				System.out.println("Paired in room " + roomName);
+			}
 		}
 		else
 		{
 			// We are the first peer, so just install ourselves.
 			_activePeers.put(roomName, peer);
+			if (_isVerbose)
+			{
+				System.out.println("Registered room " + roomName);
+			}
 		}
 		return firstPeer;
 	}

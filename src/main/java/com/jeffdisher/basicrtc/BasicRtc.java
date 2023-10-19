@@ -12,10 +12,11 @@ public class BasicRtc
 {
 	public static void main( String[] args )
 	{
-		if (args.length == 2)
+		if ((args.length == 2) || (args.length == 3))
 		{
-			int port = Integer.parseInt(args[0]);
-			File directory = new File(args[1]);
+			boolean isVerbose = "--verbose".equals(args[0]);
+			int port = Integer.parseInt(isVerbose ? args[1] : args[0]);
+			File directory = new File(isVerbose ? args[2] : args[1]);
 			if (directory.isDirectory())
 			{
 				// We will listen on every interface.
@@ -25,7 +26,7 @@ public class BasicRtc
 				RestServer server = new RestServer(interfaceToBind, staticResource, "no-store,no-cache,must-revalidate");
 				
 				// We only have the one end-point.
-				server.addWebSocketFactory("/chat/{string}", "setup", new WS_ChatSetup());
+				server.addWebSocketFactory("/chat/{string}", "setup", new WS_ChatSetup(isVerbose));
 				
 				// We don't bother with an explicit "stop", just relying on ctrl-c.
 				System.out.println("Listening on all local interfaces via port: " + port);
@@ -41,7 +42,7 @@ public class BasicRtc
 		}
 		else
 		{
-			System.err.println("BasicRtc PORT RESOURCE_PATH");
+			System.err.println("BasicRtc [--verbose] PORT RESOURCE_PATH");
 			System.exit(1);
 		}
 	}

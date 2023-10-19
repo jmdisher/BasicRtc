@@ -26,10 +26,14 @@ public class WS_ChatSetup implements IWebSocketFactory, OnePeer.IPeerRegistry
 	}
 
 	@Override
-	public synchronized void disconnectPeer(String roomName)
+	public synchronized void disconnectPeer(String roomName, OnePeer peer)
 	{
-		// Just remove this from the map, if it is there.
-		_activePeers.remove(roomName);
+		// If this exists and was registered by this peer, remove it.
+		OnePeer registeredPeer = _activePeers.get(roomName);
+		if (peer == registeredPeer)
+		{
+			_activePeers.remove(roomName);
+		}
 	}
 
 	@Override

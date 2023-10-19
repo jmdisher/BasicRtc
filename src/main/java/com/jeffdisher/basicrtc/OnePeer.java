@@ -42,8 +42,8 @@ public class OnePeer implements WebSocketListener
 	{
 		// We must have already connected.
 		Assert.assertTrue(null != _thisPeer);
-		// Unregister us - this does nothing if we were already paired.
-		_registry.disconnectPeer(_roomName);
+		// Unregister us - this does nothing if we didn't register the room or we were alread paired.
+		_registry.disconnectPeer(_roomName, this);
 		// If there is an other peer, close them, too.
 		// NOTE:  These callbacks MUST be serialized so this can't be racy.
 		if (null != _otherPeer)
@@ -114,7 +114,7 @@ public class OnePeer implements WebSocketListener
 
 	public interface IPeerRegistry
 	{
-		void disconnectPeer(String roomName);
+		void disconnectPeer(String roomName, OnePeer peer);
 		OnePeer connectPeer(String roomName, OnePeer peer);
 	}
 }

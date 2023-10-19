@@ -1,0 +1,366 @@
+<html>
+<body>
+<h1 id="connecting_header">Connecting to room...</h1>
+<h2>Their Video</h3>
+<video id="remote_video" playsinline autoplay></video><br />
+<hr />
+
+<h2>Your Video</h2>
+<video id="local_video" playsinline autoplay muted></video><br />
+<button id="toggle_video_button">Stop Video</button><button id="toggle_audio_button">Mute Audio</button><br />
+<hr />
+
+Text: <input id="chat_input" type="text" placeholder="Chat message..."></input>
+<button id="chat_button">Post</button><br />
+<textarea id="chat_log" rows="10" cols="50"></textarea><br />
+<hr />
+
+<button id="exit_button">Exit call</button>
+
+</body>
+
+<script>
+// ----------------- Capture the DOM elements we need to update or otherwise handle.
+var ELT_connecting_header = document.getElementById("connecting_header");
+var ELT_remote_video = document.getElementById("remote_video");
+
+var ELT_local_video = document.getElementById("local_video");
+var ELT_toggle_video_button = document.getElementById("toggle_video_button");
+var ELT_toggle_audio_button = document.getElementById("toggle_audio_button");
+
+var ELT_chat_input = document.getElementById("chat_input");
+var ELT_chat_button = document.getElementById("chat_button");
+var ELT_chat_log = document.getElementById("chat_log");
+
+var ELT_exit_button = document.getElementById("exit_button");
+
+// ----------------- Global variables.
+// The RTCPeerConnection.
+let _connection = null;
+// The chatroom data channel.
+let _dataChannel = null;
+// The video track we are sending to the other side.
+let _videoTrack = null;
+// The audio track we are sending to the other side.
+let _audioTrack = null;
+// Note that the ICE candidates can arrive BEFORE the offer or answer, but the WebRTC implementation wants to see the remote description first, so we buffer these until it arrives.
+let _iceCandidateBuffer = [];
+
+
+// ----------------- Our installed event handlers for the UI.
+ELT_chat_input.onkeypress = function(event)
+{
+	// We want to handle the enter key as a special-case to send the message.
+	if ("Enter" === event.key)
+	{
+		// We just want to emulate the "click".
+		ELT_chat_button.onclick(event);
+	}
+}
+ELT_chat_button.onclick = function(event)
+{
+	if (ELT_chat_input.value.length > 0)
+	{
+		// Add the message to the chatoom, send it, and clear it.
+		addToChat("Local", ELT_chat_input.value);
+		_dataChannel.send(ELT_chat_input.value);
+		ELT_chat_input.value = "";
+	}
+}
+ELT_exit_button.onclick = function(event)
+{
+	// We just want to stop everything - restarting the call will require reloading the page.
+	_connection.close();
+	connectionClosed();
+}
+ELT_toggle_video_button.onclick = function(event)
+{
+	// We use this for both stop/start of the video.
+	_videoTrack.enabled = !_videoTrack.enabled;
+	ELT_toggle_video_button.innerText = _videoTrack.enabled
+		? "Stop Video"
+		: "Start Video"
+	;
+}
+ELT_toggle_audio_button.onclick = function(event)
+{
+	// We use this for both mute/unmute of the video.
+	_audioTrack.enabled = !_audioTrack.enabled;
+	ELT_toggle_audio_button.innerText = _audioTrack.enabled
+		? "Mute Audio"
+		: "Unmute Audio"
+	;
+}
+
+// ----------------- Actual helper functions related to state, etc.
+function addToChat(user, message)
+{
+	// We just add the message on a new line.
+	ELT_chat_log.value += user + ": " + message + "\n";
+}
+function startVideo()
+{
+	// We want to resolve the camera asynchronously so we will return a promise.
+	return new Promise((resolve, reject) => {
+		navigator.mediaDevices.getUserMedia({video: true, audio: true})
+				.then(stream => {
+					// Setup the local camera.
+					ELT_local_video.srcObject = stream;
+					
+					// Capture the video track.
+					_videoTrack = (stream.getVideoTracks().length > 0) ? stream.getVideoTracks()[0] : null;
+					if (null !== _videoTrack)
+					{
+						_connection.addTrack(_videoTrack, stream);
+						ELT_toggle_video_button.disabled = false;
+					}
+					
+					// Capture the audio track.
+					_audioTrack = (stream.getAudioTracks().length > 0) ? stream.getAudioTracks()[0] : null;
+					if (null !== _audioTrack)
+					{
+						_connection.addTrack(_audioTrack, stream);
+						ELT_toggle_audio_button.disabled = false;
+					}
+					
+					// We are done so resolve the promise.
+					resolve();
+				}, reject);
+	});
+}
+function connectionEstablished()
+{
+	// Setup the UI for the connection.
+	ELT_chat_input.disabled = false;
+	ELT_chat_button.disabled = false;
+	ELT_chat_log.disabled = false;
+	ELT_exit_button.disabled = false;
+	
+	// We want to remove that "connecting" header.
+	ELT_connecting_header.parentNode.removeChild(ELT_connecting_header);
+	ELT_connecting_header = null;
+}
+function connectionClosed()
+{
+	// Shut down the UI.
+	ELT_chat_input.disabled = true;
+	ELT_chat_button.disabled = true;
+	ELT_chat_log.disabled = true;
+	ELT_exit_button.disabled = true;
+	
+	// Clean up the video.
+	_videoTrack.stop();
+	_audioTrack.stop();
+	ELT_local_video.srcObject = null;
+	ELT_remote_video.srcObject = null;
+	ELT_toggle_video_button.disabled = true;
+	ELT_toggle_audio_button.disabled = true;
+}
+function assert(flag)
+{
+	// Calling this function is mostly as a form of documentation.  We will just throw an exception on failure.
+	if (!flag)
+	{
+		throw new Error("Assertion failure");
+	}
+}
+function createConnection()
+{
+	// We expect that we don't already have the connection.
+	assert(null === _connection);
+	
+	// Add the STUN and create the peer connection.
+	const iceConfiguration = {
+		iceServers: [
+		    {
+		        urls: 'stun:stun.l.google.com:19302',
+		    }
+		],
+		iceTransportPolicy: "all",
+	}
+	_connection = new RTCPeerConnection(iceConfiguration);
+	
+	// We want to use a fixed ID to make sure that both sides have only a single channel - otherwise, we get 2 only 1 side opens the channel (and the other observes it appearing).
+	// (in that case, we can wait on the "datachannel" event and check the "event.channel" to access the channel created by the other side).
+	_dataChannel = _connection.createDataChannel('chat', {ordered: true, negotiated: true, id: 0 });
+	_dataChannel.addEventListener('open', function(event) {
+		// This is how we determine that the connection is up.
+		connectionEstablished();
+	});
+	_dataChannel.addEventListener('close', function(event) {
+		// This should only happen if the other person leaves the call.
+		connectionClosed();
+	});
+	_dataChannel.addEventListener('message', function(event) {
+		// Just add this to the chat room.
+		addToChat("Remote", event.data);
+	});
+	
+	// Set up the various callbacks we want related to WebRTC connection negotiation and video start-up.
+	_connection.onicecandidate = function(event) {
+		let tuple = null;
+		if (event.candidate)
+		{
+			tuple = {
+				candidate: event.candidate.candidate,
+				sdpMid: event.candidate.sdpMid,
+				sdpMLineIndex: event.candidate.sdpMLineIndex,
+			};
+		}
+		signalCandidate(tuple);
+	};
+	_connection.oniceconnectionstatechange = function(event)
+	{
+		// Do we see this happen and do we need to do anything with it?
+		console.log("NOTE:  ICE state change");
+	}
+	_connection.ontrack = function(event)
+	{
+		// We will just grab the first stream.
+		ELT_remote_video.srcObject = event.streams[0];
+	}
+	
+	// We want to start the video before anyone produces an offer or answer.
+	return new Promise((resolve, reject) => {
+		startVideo().then(resolve, reject);
+	});
+}
+function setRemoteDescription(payload)
+{
+	// Apply the description.
+	_connection.setRemoteDescription(payload);
+	
+	// Apply the buffered ICE candidates.
+	for (const ice of _iceCandidateBuffer)
+	{
+		_connection.addIceCandidate(ice);
+	}
+	_iceCandidateBuffer = null;
+}
+function signalStart()
+{
+	const message = {
+		type: 'start',
+		payload: null,
+	};
+	_signaling.postMessage(JSON.stringify(message));
+}
+function signalOffer(payload)
+{
+	const message = {
+		type: 'offer',
+		payload: payload,
+	};
+	_signaling.postMessage(JSON.stringify(message));
+}
+function signalAnswer(payload)
+{
+	const message = {
+		type: 'answer',
+		payload: payload,
+	};
+	_signaling.postMessage(JSON.stringify(message));
+}
+function signalCandidate(payload)
+{
+	const message = {
+		type: 'candidate',
+		payload: payload,
+	};
+	_signaling.postMessage(JSON.stringify(message));
+}
+function handleStart(payload)
+{
+	// This is called on the FIRST user since the SECOND user has accessed the broadcast channel and told us to start.
+	// The SECOND user won't see this since they weren't yet on the channel when we sent the start.
+	assert(null === _connection);
+	createConnection().then(function(good) {
+		// Everything is ready so we can send the offer.
+		_connection.createOffer().then(function(offer) {
+			// If this is from the "start" call, then we want to send an offer.  Otherwise, we are sending an answer.
+			signalOffer(offer);
+			// Set the local description.
+			_connection.setLocalDescription(offer);
+		});
+	}, function(error) {
+		alert(error);
+	});
+}
+function handleOffer(payload)
+{
+	// This is called on the SECOND user when we see the offer from the FIRST user.
+	assert(null === _connection);
+	createConnection().then(function(good) {
+		// Set the description based on the their offer.
+		setRemoteDescription(payload);
+		// We now need to create the answer.
+		_connection.createAnswer().then(function(answer) {
+			// We can send the answer.
+			signalAnswer(answer);
+			// Set the local description to be the answer we are giving.
+			_connection.setLocalDescription(answer);
+		});
+	}, function(error) {
+		alert(error);
+	});
+}
+function handleAnswer(payload)
+{
+	// This is called on the FIRST user and have the answer from the SECOND (after we sent them an offer).
+	assert(null !== _connection);
+	// We can set the remote description to what they sent us.
+	setRemoteDescription(payload);
+}
+function handleCandidate(payload)
+{
+	// This is called for both the FIRST and SECOND user while establishing the connection (and potentially after the connection is established).
+	assert(null !== _connection);
+	if (null !== _iceCandidateBuffer)
+	{
+		_iceCandidateBuffer.push(payload);
+	}
+	else
+	{
+		// We ignore the promise since we don't do anything with it.
+		_connection.addIceCandidate(payload);
+	}
+}
+
+
+// ----------------- Set initial UI state.
+ELT_chat_input.disabled = true;
+ELT_chat_button.disabled = true;
+ELT_chat_log.disabled = true;
+ELT_exit_button.disabled = true;
+ELT_toggle_video_button.disabled = true;
+ELT_toggle_audio_button.disabled = true;
+
+
+// ----------------- Begin state machine.
+// Note that we just use the BroadcastChannel for this initial testing.  This will be replaced by a WebSocket to the server, later on.
+const _signaling = new BroadcastChannel('webrtc');
+_signaling.onmessage = function(event)
+{
+	let object = JSON.parse(event.data);
+	switch (object.type)
+	{
+		case 'start':
+			handleStart(object.payload);
+			break;
+		case 'offer':
+			handleOffer(object.payload);
+			break;
+		case 'answer':
+			handleAnswer(object.payload);
+			break;
+		case 'candidate':
+			handleCandidate(object.payload);
+			break;
+	}
+}
+
+// We will kick this off by sending start.  If there is a user on the other side, it will start the connection and send an offer.
+signalStart();
+</script>
+</html>
+

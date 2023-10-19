@@ -45,6 +45,10 @@ let _videoTrack = null;
 let _audioTrack = null;
 // Note that the ICE candidates can arrive BEFORE the offer or answer, but the WebRTC implementation wants to see the remote description first, so we buffer these until it arrives.
 let _iceCandidateBuffer = [];
+// We want to close the WebSocket after the connection has opened AND all the ICE candidates have been sent and received.
+let _connectionOpened = false;
+let _sendingCandidates = true;
+let _receivingCandidates = true;
 
 
 // ----------------- Our installed event handlers for the UI.
@@ -72,6 +76,11 @@ ELT_exit_button.onclick = function(event)
 	// We just want to stop everything - restarting the call will require reloading the page.
 	_connection.close();
 	connectionClosed();
+	if (null !== _signaling)
+	{
+		_signaling.close();
+		_signaling = null;
+	}
 }
 ELT_toggle_video_button.onclick = function(event)
 {
@@ -128,6 +137,14 @@ function startVideo()
 				}, reject);
 	});
 }
+function tryCloseWebSocket()
+{
+	if ((null !== _signaling) && _connectionOpened && !_sendingCandidates && !_receivingCandidates)
+	{
+		_signaling.close();
+		_signaling = null;
+	}
+}
 function connectionEstablished()
 {
 	// Setup the UI for the connection.
@@ -139,6 +156,19 @@ function connectionEstablished()
 	// We want to remove that "connecting" header.
 	ELT_connecting_header.parentNode.removeChild(ELT_connecting_header);
 	ELT_connecting_header = null;
+	
+	_connectionOpened = true;
+	tryCloseWebSocket();
+}
+function sentLastIceCandidate()
+{
+	_sendingCandidates = false;
+	tryCloseWebSocket();
+}
+function receivedLastIceCandidate()
+{
+	_receivingCandidates = false;
+	tryCloseWebSocket();
 }
 function connectionClosed()
 {
@@ -208,6 +238,10 @@ function createConnection()
 			};
 		}
 		signalCandidate(tuple);
+		if (null === event.candidate)
+		{
+			sentLastIceCandidate();
+		}
 	};
 	_connection.oniceconnectionstatechange = function(event)
 	{
@@ -243,7 +277,7 @@ function signalStart()
 		type: 'start',
 		payload: null,
 	};
-	_signaling.postMessage(JSON.stringify(message));
+	_signaling.send(JSON.stringify(message));
 }
 function signalOffer(payload)
 {
@@ -251,7 +285,7 @@ function signalOffer(payload)
 		type: 'offer',
 		payload: payload,
 	};
-	_signaling.postMessage(JSON.stringify(message));
+	_signaling.send(JSON.stringify(message));
 }
 function signalAnswer(payload)
 {
@@ -259,7 +293,7 @@ function signalAnswer(payload)
 		type: 'answer',
 		payload: payload,
 	};
-	_signaling.postMessage(JSON.stringify(message));
+	_signaling.send(JSON.stringify(message));
 }
 function signalCandidate(payload)
 {
@@ -267,7 +301,7 @@ function signalCandidate(payload)
 		type: 'candidate',
 		payload: payload,
 	};
-	_signaling.postMessage(JSON.stringify(message));
+	_signaling.send(JSON.stringify(message));
 }
 function handleStart(payload)
 {
@@ -324,6 +358,22 @@ function handleCandidate(payload)
 		// We ignore the promise since we don't do anything with it.
 		_connection.addIceCandidate(payload);
 	}
+	if (null === payload)
+	{
+		receivedLastIceCandidate();
+	}
+}
+function getRoomName(url)
+{
+	let name = "default";
+	for (const [key, value] of url.searchParams)
+	{
+		if (("room" === key) && (value.length > 0))
+		{
+			name = value;
+		}
+	}
+	return name;
 }
 
 
@@ -337,8 +387,12 @@ ELT_toggle_audio_button.disabled = true;
 
 
 // ----------------- Begin state machine.
-// Note that we just use the BroadcastChannel for this initial testing.  This will be replaced by a WebSocket to the server, later on.
-const _signaling = new BroadcastChannel('webrtc');
+// We will create a WebSocket to pass data around.
+// NOTE:  We assume that the server will send the "start" command.
+let url = new URL(window.location);
+let roomName = getRoomName(url);
+let socketUrl = (("https:" === url.protocol) ? "wss:" : "ws:") + "//" + url.host + "/chat/" + roomName;
+var _signaling = new WebSocket(socketUrl, "setup");
 _signaling.onmessage = function(event)
 {
 	let object = JSON.parse(event.data);
@@ -358,9 +412,6 @@ _signaling.onmessage = function(event)
 			break;
 	}
 }
-
-// We will kick this off by sending start.  If there is a user on the other side, it will start the connection and send an offer.
-signalStart();
 </script>
 </html>
 

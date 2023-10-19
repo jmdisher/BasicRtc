@@ -17,6 +17,10 @@ Text: <input id="chat_input" type="text" placeholder="Chat message..."></input>
 
 <button id="exit_button">Exit call</button>
 
+<div id="debug_div">
+	<h2>Debug log</H2>
+	<textarea id="debug_log" rows="50" cols="100"></textarea><br />
+</div>
 </body>
 
 <script>
@@ -33,6 +37,9 @@ var ELT_chat_button = document.getElementById("chat_button");
 var ELT_chat_log = document.getElementById("chat_log");
 
 var ELT_exit_button = document.getElementById("exit_button");
+
+var ELT_debug_div = document.getElementById("debug_div");
+var ELT_debug_log = document.getElementById("debug_log");
 
 // ----------------- Global variables.
 // The RTCPeerConnection.
@@ -186,18 +193,22 @@ function connectionClosed()
 	ELT_toggle_video_button.disabled = true;
 	ELT_toggle_audio_button.disabled = true;
 }
-function assert(flag)
+function assert(description, flag)
 {
 	// Calling this function is mostly as a form of documentation.  We will just throw an exception on failure.
 	if (!flag)
 	{
-		throw new Error("Assertion failure");
+		if (null !== ELT_debug_log)
+		{
+			ELT_debug_log.value += "ASSERT: " + description + "\n";
+		}
+		throw new Error("Assertion failure: " + description);
 	}
 }
 function createConnection()
 {
 	// We expect that we don't already have the connection.
-	assert(null === _connection);
+	assert("Connection should not already exist in create", null === _connection);
 	
 	// Add the STUN and create the peer connection.
 	const iceConfiguration = {
@@ -271,13 +282,22 @@ function setRemoteDescription(payload)
 	}
 	_iceCandidateBuffer = null;
 }
+function sendMessage(message)
+{
+	let raw = JSON.stringify(message);
+	if (null !== ELT_debug_log)
+	{
+		ELT_debug_log.value += "SEND: " + raw + "\n";
+	}
+	_signaling.send(raw);
+}
 function signalStart()
 {
 	const message = {
 		type: 'start',
 		payload: null,
 	};
-	_signaling.send(JSON.stringify(message));
+	sendMessage(message);
 }
 function signalOffer(payload)
 {
@@ -285,7 +305,7 @@ function signalOffer(payload)
 		type: 'offer',
 		payload: payload,
 	};
-	_signaling.send(JSON.stringify(message));
+	sendMessage(message);
 }
 function signalAnswer(payload)
 {
@@ -293,7 +313,7 @@ function signalAnswer(payload)
 		type: 'answer',
 		payload: payload,
 	};
-	_signaling.send(JSON.stringify(message));
+	sendMessage(message);
 }
 function signalCandidate(payload)
 {
@@ -301,13 +321,13 @@ function signalCandidate(payload)
 		type: 'candidate',
 		payload: payload,
 	};
-	_signaling.send(JSON.stringify(message));
+	sendMessage(message);
 }
 function handleStart(payload)
 {
 	// This is called on the FIRST user since the SECOND user has accessed the broadcast channel and told us to start.
 	// The SECOND user won't see this since they weren't yet on the channel when we sent the start.
-	assert(null === _connection);
+	assert("Connection should not already exist in start", null === _connection);
 	createConnection().then(function(good) {
 		// Everything is ready so we can send the offer.
 		_connection.createOffer().then(function(offer) {
@@ -325,7 +345,7 @@ function handleStart(payload)
 function handleOffer(payload)
 {
 	// This is called on the SECOND user when we see the offer from the FIRST user.
-	assert(null === _connection);
+	assert("Connection should not already exist in offer", null === _connection);
 	createConnection().then(function(good) {
 		// Set the description based on the their offer.
 		setRemoteDescription(payload);
@@ -345,14 +365,14 @@ function handleOffer(payload)
 function handleAnswer(payload)
 {
 	// This is called on the FIRST user and have the answer from the SECOND (after we sent them an offer).
-	assert(null !== _connection);
+	assert("Connection should already exist in answer", null !== _connection);
 	// We can set the remote description to what they sent us.
 	setRemoteDescription(payload);
 }
 function handleCandidate(payload)
 {
 	// This is called for both the FIRST and SECOND user while establishing the connection (and potentially after the connection is established).
-	assert(null !== _connection);
+	assert("Connection should already exist in candidate", null !== _connection);
 	if (null !== _iceCandidateBuffer)
 	{
 		_iceCandidateBuffer.push(payload);
@@ -379,6 +399,18 @@ function getRoomName(url)
 	}
 	return name;
 }
+function isDebugMode(url)
+{
+	let isDebug = false;
+	for (const [key, value] of url.searchParams)
+	{
+		if ("debug" === key)
+		{
+			isDebug = true;
+		}
+	}
+	return isDebug;
+}
 
 
 // ----------------- Set initial UI state.
@@ -396,9 +428,20 @@ ELT_toggle_audio_button.disabled = true;
 let url = new URL(window.location);
 let roomName = getRoomName(url);
 let socketUrl = (("https:" === url.protocol) ? "wss:" : "ws:") + "//" + url.host + "/chat/" + roomName;
+if (!isDebugMode(url))
+{
+	// Remove the debug section from the page.
+	ELT_debug_div.parentNode.removeChild(ELT_debug_div);
+	ELT_debug_div = null;
+	ELT_debug_log = null;
+}
 var _signaling = new WebSocket(socketUrl, "setup");
 _signaling.onmessage = function(event)
 {
+	if (null !== ELT_debug_log)
+	{
+		ELT_debug_log.value += "RECEIVE: " + event.data + "\n";
+	}
 	let object = JSON.parse(event.data);
 	switch (object.type)
 	{
@@ -418,6 +461,10 @@ _signaling.onmessage = function(event)
 }
 _signaling.onclose = function(event)
 {
+	if (null !== ELT_debug_log)
+	{
+		ELT_debug_log.value += "Signaling closed\n";
+	}
 	// This can happen due to an error or due to everything starting up properly so check that.
 	if (!_connectionOpened)
 	{

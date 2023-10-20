@@ -1,8 +1,5 @@
 package com.jeffdisher.basicrtc;
 
-import java.util.HashMap;
-import java.util.Map;
-
 import org.eclipse.jetty.websocket.api.WebSocketListener;
 import org.eclipse.jetty.websocket.server.JettyServerUpgradeRequest;
 
@@ -19,7 +16,7 @@ public class WS_ChatSetup implements IWebSocketFactory, OnePeer.IPeerRegistry
 	public static final String HEADER_XFF = "X-Forwarded-For";
 
 	private final boolean _isVerbose;
-	private final Map<String, OnePeer> _activePeers = new HashMap<>();
+	private final PairConnector<OnePeer> _activePeers = new PairConnector<>((OnePeer first, OnePeer second) -> first.attachOtherPeer(second));
 
 	public WS_ChatSetup(boolean isVerbose)
 	{
@@ -41,42 +38,30 @@ public class WS_ChatSetup implements IWebSocketFactory, OnePeer.IPeerRegistry
 	}
 
 	@Override
-	public synchronized void disconnectPeer(String roomName, OnePeer peer)
+	public void disconnectPeer(String roomName, OnePeer peer)
 	{
-		// If this exists and was registered by this peer, remove it.
-		OnePeer registeredPeer = _activePeers.get(roomName);
-		if (peer == registeredPeer)
+		boolean didRemove = _activePeers.removePartialIfMatched(roomName, peer);
+		if (_isVerbose && didRemove)
 		{
-			_activePeers.remove(roomName);
-			if (_isVerbose)
-			{
-				System.out.println("Deregistered room " + roomName);
-			}
+			System.out.println("Deregistered room " + roomName);
 		}
 	}
 
 	@Override
-	public synchronized OnePeer connectPeer(String roomName, OnePeer peer)
+	public OnePeer connectPeer(String roomName, OnePeer peer)
 	{
-		// See if there is already a peer registered.  If so, remove it from the map, connect it to this new peer, and return it.
-		OnePeer firstPeer = _activePeers.remove(roomName);
-		if (null != firstPeer)
+		OnePeer matchedAndRemoved = _activePeers.attachOrRegisterPartial(roomName, peer);
+		if (_isVerbose)
 		{
-			firstPeer.attachOtherPeer(peer);
-			if (_isVerbose)
+			if (null != matchedAndRemoved)
 			{
 				System.out.println("Paired in room " + roomName);
 			}
-		}
-		else
-		{
-			// We are the first peer, so just install ourselves.
-			_activePeers.put(roomName, peer);
-			if (_isVerbose)
+			else
 			{
 				System.out.println("Registered room " + roomName);
 			}
 		}
-		return firstPeer;
+		return matchedAndRemoved;
 	}
 }

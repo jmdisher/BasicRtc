@@ -118,7 +118,9 @@ function startVideo()
 {
 	// We want to resolve the camera asynchronously so we will return a promise.
 	return new Promise((resolve, reject) => {
-		navigator.mediaDevices.getUserMedia({video: true, audio: true})
+		if (undefined !== navigator.mediaDevices)
+		{
+			navigator.mediaDevices.getUserMedia({video: true, audio: true})
 				.then(stream => {
 					// Setup the local camera.
 					ELT_local_video.srcObject = stream;
@@ -141,7 +143,16 @@ function startVideo()
 					
 					// We are done so resolve the promise.
 					resolve();
-				}, reject);
+				}, error => {
+					// This will happen if the camera doesn't exist or the camera access was denied.
+					reject("A camera and microphone are required before accessing the room");
+				});
+		}
+		else
+		{
+			// This generally means that the system is accessed over HTTP (no SSL).
+			reject("No media devices - make sure that this is accessed over SSL or 127.0.0.1");
+		}
 	});
 }
 function tryCloseWebSocket()

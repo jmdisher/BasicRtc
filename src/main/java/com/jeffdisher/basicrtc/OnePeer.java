@@ -1,7 +1,6 @@
 package com.jeffdisher.basicrtc;
 
 import java.io.IOException;
-import java.net.SocketAddress;
 import java.time.Duration;
 
 import org.eclipse.jetty.websocket.api.Session;
@@ -15,15 +14,16 @@ import com.jeffdisher.breakwater.utilities.Assert;
 public class OnePeer implements WebSocketListener
 {
 	private final boolean _isVerbose;
+	private final String _peerDescription;
 	private final String _roomName;
 	private final IPeerRegistry _registry;
 	private Session _thisPeer;
-	private SocketAddress _thisPeerAddress;
 	private OnePeer _otherPeer;
 
-	public OnePeer(boolean isVerbose, String roomName, IPeerRegistry registry)
+	public OnePeer(boolean isVerbose, String peerDescription, String roomName, IPeerRegistry registry)
 	{
 		_isVerbose = isVerbose;
+		_peerDescription = peerDescription;
 		_roomName = roomName;
 		_registry = registry;
 	}
@@ -56,7 +56,7 @@ public class OnePeer implements WebSocketListener
 		}
 		if (_isVerbose)
 		{
-			System.out.println("Disconnect in " + _roomName + ": " + _thisPeerAddress);
+			System.out.println("Disconnect in " + _roomName + ": " + _peerDescription);
 		}
 	}
 
@@ -65,11 +65,9 @@ public class OnePeer implements WebSocketListener
 	{
 		Assert.assertTrue(null == _thisPeer);
 		_thisPeer = session;
-		// We cache the peer address since it seems to sometimes be cleared in disconnect.
-		_thisPeerAddress = _thisPeer.getRemoteAddress();
 		if (_isVerbose)
 		{
-			System.out.println("Connect in " + _roomName + ": " + _thisPeerAddress);
+			System.out.println("Connect in " + _roomName + ": " + _peerDescription);
 		}
 		
 		// Set the timeout to 30 minutes - should be reasonable for this use-case.
@@ -116,7 +114,7 @@ public class OnePeer implements WebSocketListener
 		// We just send the message to the other side.
 		if (_isVerbose)
 		{
-			System.out.println("Message in " + _roomName + ": " + message);
+			System.out.println("Message in " + _roomName + " (from " + _peerDescription + "): " + message);
 		}
 		try
 		{

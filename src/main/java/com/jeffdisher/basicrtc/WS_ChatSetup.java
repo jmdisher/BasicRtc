@@ -16,6 +16,8 @@ import com.jeffdisher.breakwater.IWebSocketFactory;
  */
 public class WS_ChatSetup implements IWebSocketFactory, OnePeer.IPeerRegistry
 {
+	public static final String HEADER_XFF = "X-Forwarded-For";
+
 	private final boolean _isVerbose;
 	private final Map<String, OnePeer> _activePeers = new HashMap<>();
 
@@ -27,8 +29,15 @@ public class WS_ChatSetup implements IWebSocketFactory, OnePeer.IPeerRegistry
 	@Override
 	public WebSocketListener create(JettyServerUpgradeRequest arg0, Object[] arg1)
 	{
+		// This is typically used behind a proxy (for SSL termination), so check if there is a proxy header.
+		String peerDescription = arg0.getHeader(HEADER_XFF);
+		if (null == peerDescription)
+		{
+			// If not, just fall-back to the remote address.
+			peerDescription = arg0.getRemoteSocketAddress().toString();
+		}
 		String roomName = (String)arg1[1];
-		return new OnePeer(_isVerbose, roomName, this);
+		return new OnePeer(_isVerbose, peerDescription, roomName, this);
 	}
 
 	@Override

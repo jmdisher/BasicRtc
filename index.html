@@ -1,26 +1,65 @@
 <html>
+<head>
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+	<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
+</head>
+
 <body>
-<h1 id="connecting_header">Connecting to room...</h1>
-<h2>Their Video</h3>
-<video id="remote_video" playsinline autoplay></video><br />
-<hr />
+	<h1 id="connecting_header">Connecting to room...</h1>
+	<div class="row">
+		<div class="col">
+			<div class="card">
+				<div class="card-header">Their Video</div>
+				<div class="card-body">
+					<video id="remote_video" playsinline autoplay></video>
+				</div>
+			</div>
+		</div>
+		<div class="col">
+			<div class="card">
+				<div class="card-header">Your Video</div>
+				<div class="card-body">
+					<video id="local_video" playsinline autoplay muted></video><br />
+					<button class="btn btn-warning" id="toggle_video_button">Stop Video</button><button class="btn btn-primary" id="toggle_audio_button">Mute Audio</button>
+				</div>
+			</div>
+		</div>
+	</div>
+	
+	<div class="row">
+		<div class="col">
+			<div class="input-group">
+				<input type="text" class="form-control" id="chat_input" placeholder="Chat message...">
+				<button class="btn" type="button" id="chat_button">Post</button>
+			</div>
+		</div>
+	</div>
+	<div class="row">
+		<div class="col">
+			<div class="card">
+				<div class="card-header">Chat log</div>
+				<div class="card-body">
+					<div class="input-group">
+						<textarea class="form-control" id="chat_log" rows="10" readonly></textarea>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+	<button class="btn btn-danger" id="exit_button">Exit call</button>
 
-<h2>Your Video</h2>
-<video id="local_video" playsinline autoplay muted></video><br />
-<button id="toggle_video_button">Stop Video</button><button id="toggle_audio_button">Mute Audio</button><br />
-<hr />
-
-Text: <input id="chat_input" type="text" placeholder="Chat message..."></input>
-<button id="chat_button">Post</button><br />
-<textarea id="chat_log" rows="10" cols="50"></textarea><br />
-<hr />
-
-<button id="exit_button">Exit call</button>
-
-<div id="debug_div">
-	<h2>Debug log</H2>
-	<textarea id="debug_log" rows="50" cols="100"></textarea><br />
-</div>
+	<div class="row" id="debug_div">
+		<div class="col">
+			<div class="card">
+				<div class="card-header">Debug log</div>
+				<div class="card-body">
+					<div class="input-group">
+						<textarea class="form-control" id="debug_log" rows="50" readonly></textarea>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
 </body>
 
 <script>

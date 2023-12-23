@@ -92,8 +92,7 @@ let _videoTrack = null;
 let _audioTrack = null;
 // Note that the ICE candidates can arrive BEFORE the offer or answer, but the WebRTC implementation wants to see the remote description first, so we buffer these until it arrives.
 let _iceCandidateBuffer = [];
-// We want to close the WebSocket after the connection has opened AND all the ICE candidates have been sent and received.
-let _connectionOpened = false;
+// We want to close the WebSocket after all the ICE candidates have been sent and received (the WebRTC connection start-up is independent after the exchange happens).
 let _sendingCandidates = true;
 let _receivingCandidates = true;
 
@@ -197,7 +196,7 @@ function startVideo()
 }
 function tryCloseWebSocket()
 {
-	if ((null !== _signaling) && _connectionOpened && !_sendingCandidates && !_receivingCandidates)
+	if ((null !== _signaling) && !_sendingCandidates && !_receivingCandidates)
 	{
 		_signaling.close();
 		_signaling = null;
@@ -214,9 +213,6 @@ function connectionEstablished()
 	// We want to remove that "connecting" header.
 	ELT_connecting_header.parentNode.removeChild(ELT_connecting_header);
 	ELT_connecting_header = null;
-	
-	_connectionOpened = true;
-	tryCloseWebSocket();
 }
 function sentLastIceCandidate()
 {
@@ -230,6 +226,18 @@ function receivedLastIceCandidate()
 }
 function connectionClosed()
 {
+	enterShutdownState("WebRTC connection closed - refresh page to restart call");
+}
+function enterShutdownState(headerMessage)
+{
+	// If the header is still present, say that the connection is closed.
+	if (null !== ELT_connecting_header)
+	{
+		// The header is nulled when the connection first comes up so this is to handle the case where something went wrong before we got that far.
+		ELT_connecting_header.innerText = headerMessage;
+		ELT_connecting_header = null;
+	}
+	
 	// Shut down the UI.
 	ELT_chat_input.disabled = true;
 	ELT_chat_button.disabled = true;
@@ -237,8 +245,14 @@ function connectionClosed()
 	ELT_exit_button.disabled = true;
 	
 	// Clean up the video.
-	_videoTrack.stop();
-	_audioTrack.stop();
+	if (null !== _videoTrack)
+	{
+		_videoTrack.stop();
+	}
+	if (null !== _audioTrack)
+	{
+		_audioTrack.stop();
+	}
 	ELT_local_video.srcObject = null;
 	ELT_remote_video.srcObject = null;
 	ELT_toggle_video_button.disabled = true;
@@ -249,11 +263,16 @@ function assert(description, flag)
 	// Calling this function is mostly as a form of documentation.  We will just throw an exception on failure.
 	if (!flag)
 	{
-		if (null !== ELT_debug_log)
-		{
-			ELT_debug_log.value += "ASSERT: " + description + "\n";
-		}
+		debugLog("ASSERT: " + description);
+		enterShutdownState("Assert fail:  " + description);
 		throw new Error("Assertion failure: " + description);
+	}
+}
+function debugLog(message)
+{
+	if (null !== ELT_debug_log)
+	{
+		ELT_debug_log.value += message + "\n";
 	}
 }
 function createConnection()
@@ -277,10 +296,12 @@ function createConnection()
 	_dataChannel = _connection.createDataChannel('chat', {ordered: true, negotiated: true, id: 0 });
 	_dataChannel.addEventListener('open', function(event) {
 		// This is how we determine that the connection is up.
+		console.log("Data channel connection: OPEN");
 		connectionEstablished();
 	});
 	_dataChannel.addEventListener('close', function(event) {
 		// This should only happen if the other person leaves the call.
+		console.log("Data channel connection: CLOSE");
 		connectionClosed();
 	});
 	_dataChannel.addEventListener('message', function(event) {
@@ -336,10 +357,7 @@ function setRemoteDescription(payload)
 function sendMessage(message)
 {
 	let raw = JSON.stringify(message);
-	if (null !== ELT_debug_log)
-	{
-		ELT_debug_log.value += "SEND: " + raw + "\n";
-	}
+	debugLog("SEND: " + raw);
 	_signaling.send(raw);
 }
 function signalStart()
@@ -374,6 +392,14 @@ function signalCandidate(payload)
 	};
 	sendMessage(message);
 }
+function signalError(payload)
+{
+	const message = {
+		type: 'error',
+		payload: payload,
+	};
+	sendMessage(message);
+}
 function handleStart(payload)
 {
 	// This is called on the FIRST user since the SECOND user has accessed the broadcast channel and told us to start.
@@ -389,8 +415,10 @@ function handleStart(payload)
 		});
 	}, function(error) {
 		// This error is usually related to the camera acquision so fail out.
+		signalError(error);
 		_signaling.close();
 		alert(error);
+		enterShutdownState("Start error:  " + error);
 	});
 }
 function handleOffer(payload)
@@ -409,8 +437,10 @@ function handleOffer(payload)
 		});
 	}, function(error) {
 		// This error is usually related to the camera acquision so fail out.
+		signalError(error);
 		_signaling.close();
 		alert(error);
+		enterShutdownState("Offer error:  " + error);
 	});
 }
 function handleAnswer(payload)
@@ -437,6 +467,12 @@ function handleCandidate(payload)
 	{
 		receivedLastIceCandidate();
 	}
+}
+function handleError(payload)
+{
+	console.log("Peer error: " + payload);
+	debugLog("Peer error: " + payload);
+	enterShutdownState("Peer experienced error - refresh page to try again");
 }
 function getRoomName(url)
 {
@@ -487,12 +523,14 @@ if (!isDebugMode(url))
 	ELT_debug_log = null;
 }
 var _signaling = new WebSocket(socketUrl, "setup");
+_signaling.onopen = function(event)
+{
+	// We only use this event for logging.
+	console.log("Signalling:  OPEN");
+}
 _signaling.onmessage = function(event)
 {
-	if (null !== ELT_debug_log)
-	{
-		ELT_debug_log.value += "RECEIVE: " + event.data + "\n";
-	}
+	debugLog("RECEIVE: " + event.data);
 	let object = JSON.parse(event.data);
 	switch (object.type)
 	{
@@ -508,36 +546,18 @@ _signaling.onmessage = function(event)
 		case 'candidate':
 			handleCandidate(object.payload);
 			break;
+		case 'error':
+			handleError(object.payload);
+			break;
 	}
 }
 _signaling.onclose = function(event)
 {
-	if (null !== ELT_debug_log)
-	{
-		ELT_debug_log.value += "Signaling closed\n";
-	}
-	// This can happen due to an error or due to everything starting up properly so check that.
-	if (!_connectionOpened)
-	{
-		// Something went wrong during startup.
-		_signaling = null;
-		ELT_connecting_header.innerText = "Error - refresh page to try again";
-		ELT_connecting_header = null;
-		
-		// We don't know when we failed so check what else is running.
-		if (null !== _videoTrack)
-		{
-			_videoTrack.stop();
-		}
-		if (null !== _audioTrack)
-		{
-			_audioTrack.stop();
-		}
-		ELT_local_video.srcObject = null;
-		ELT_remote_video.srcObject = null;
-		ELT_toggle_video_button.disabled = true;
-		ELT_toggle_audio_button.disabled = true;
-	}
+	console.log("Signalling:  CLOSE");
+	_signaling = null;
+	debugLog("Signaling closed");
+	
+	// Note that the signalling connection can close after failure to establish a connection or while the connection is still coming up so making clean-up decisions based on this is unreliable.
 }
 </script>
 </html>
